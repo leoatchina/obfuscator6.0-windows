@@ -624,58 +624,59 @@ void CryptoUtils::populate_pool() {
 }
 
 bool CryptoUtils::prng_seed() {
+		bool bRet = false;
+		HCRYPTPROV Rnd;
+		LPCSTR UserName = "MyKeyContainer";
+		if(CryptAcquireContext(&Rnd, UserName, NULL, PROV_RSA_FULL, 0)) {
+				printf("A cryptographic context with the %s key container ",
+								UserName);
+				printf("has been acquired.\n\n");
+				bRet = true;
+		} else {
+				if (GetLastError() == NTE_BAD_KEYSET) {
+						if(CryptAcquireContext(
+												&Rnd,
+												UserName,
+												NULL,
+												PROV_RSA_FULL,
+												CRYPT_NEWKEYSET)) {
+								printf("A new key container has been created.\n");
+						} else {
+								printf("Could not create a new key container.\n");
+								//exit(1);
+								bRet = false;
+						}
+				} else {
+						printf("A cryptographic service handle could not be "
+										"acquired.\n");
+						//exit(1);
+						bRet = false;
+				}
+		}
 
-#if defined(_WINDOWS)
-	std::random_device rd;
-	std::uniform_int_distribution<int> dist(0, 255);
-	for (int n = 0; n < 16; ++n) {
-		key[n] = static_cast<char>(dist(rd));
-	}
+		if (bRet)  {
+				if (CryptGenRandom(Rnd, 4, (BYTE*)key)) {
+						//printf("%d\n\n", key);
+						memset(ctr, 0, 16);
 
-	DEBUG_WITH_TYPE("cryptoutils", dbgs() << "cryptoutils seeded with std::random_device\n");
+						// Once the seed is there, we compute the
+						// AES128 key-schedule
+						aes_compute_ks(ks, key);
+						seeded = true;
+						bRet = true;
+				}
+				else {
+						puts("Windows CryptGenRandom Error\n");
+						bRet = false;
+				}
 
-	memset(ctr, 0, 16);
-
-	// Once the seed is there, we compute the
-	// AES128 key-schedule
-	aes_compute_ks(ks, key);
-
-	seeded = true;
-	return true;
-#else
-	
-#if defined(__linux__)
-  std::ifstream devrandom("/dev/urandom");
-#else
-  std::ifstream devrandom("/dev/random");
-#endif
-
-  if (devrandom) {
-
-    devrandom.read(key, 16);
-
-    if (devrandom.gcount() != 16) {
-      errs()<<"Cannot read enough bytes in /dev/random\n";
-	  return false;
-    }
-
-    devrandom.close();
-    DEBUG_WITH_TYPE("cryptoutils", dbgs() << "cryptoutils seeded with /dev/random\n");
-
-    memset(ctr, 0, 16);
-
-    // Once the seed is there, we compute the
-    // AES128 key-schedule
-    aes_compute_ks(ks, key);
-
-    seeded = true;
-  } else {
-    errs()<<"Cannot open /dev/random\n";
-	return false;
-  }
-  return true;
-#endif // _WINDOWS
-
+				if (CryptReleaseContext(Rnd,0)) {
+						printf("The handle has been released.\n\n");
+				} else {
+						printf("The handle could not be released.\n\n");
+				}
+		}
+		return bRet;
 }
 
 void CryptoUtils::inc_ctr() {
